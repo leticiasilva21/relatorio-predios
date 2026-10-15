@@ -93,6 +93,10 @@ td.prov{color:var(--orange-ink);font-style:italic;}
 .status{color:var(--muted);font-size:12px;margin:-14px 0 18px;font-variant-numeric:tabular-nums;}
 .loading{color:var(--muted);font-size:13px;padding:40px 0;}
 .loading.err{color:var(--orange-ink);}
+.status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.refresh-btn{background:none;border:1px solid var(--border);color:var(--blue);border-radius:6px;padding:4px 11px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
+.refresh-btn:hover{border-color:var(--blue);}
+.refresh-btn:disabled{opacity:.6;cursor:default;}
 </style>
 </head>
 <body>
@@ -120,8 +124,8 @@ td.prov{color:var(--orange-ink);font-style:italic;}
     <h1>Relatório Mensal por Prédio — Carpediem</h1>
     <p class="subtitle">Ocupação, ticket médio por noite e receita média do prédio (por unidade ativa), comparando o ano anterior x o ano atual. Dados de reservas confirmadas (status "Reserva", exclui reservas do proprietário).
     Só entram na conta de ocupação/receita as unidades com pelo menos uma reserva em até 3 meses antes ou depois do mês analisado — unidades sem reserva nesse intervalo (calendário fechado por fim de contrato, por exemplo) saem do cálculo naquele mês.
-    Reservas gravadas no ID do "mestre" de uma categoria (nome contendo "Margem de Manobra", não-clone) foram reatribuídas ao prédio dos anúncios-irmãos reais daquele grupo — a estadia é real, só a sincronização da Stays grava no mestre em vez do anúncio físico específico. Já os "Margem de Manobra" que são clone (cópia de slot vago dentro da categoria) continuam fora do cálculo. Os números são calculados ao vivo a partir da base Supabase sempre que a página é aberta.</p>
-    <p class="status" id="dataStatus"></p>
+    Reservas gravadas no ID do "mestre" de uma categoria (nome contendo "Margem de Manobra", não-clone) foram reatribuídas ao prédio dos anúncios-irmãos reais daquele grupo — a estadia é real, só a sincronização da Stays grava no mestre em vez do anúncio físico específico. Já os "Margem de Manobra" que são clone (cópia de slot vago dentro da categoria) continuam fora do cálculo. Os números vêm do último snapshot da base Supabase — clique em "Atualizar dados" para recalcular com as reservas de agora.</p>
+    <p class="status" id="dataStatus"><span id="dataStatusText"></span> <button id="btnRefresh" class="refresh-btn" type="button">Atualizar dados</button></p>
     <div class="tabs" id="tabs"></div>
     <div id="panels"><p class="loading" id="loadingMsg">Carregando dados atualizados…</p></div>
   </div>
@@ -205,22 +209,40 @@ function showApp(email) {
 }
 
 let loaded = false;
+let refreshing = false;
+function render(data) {
+  const R = computeReport(data.rows, todayRecife());
+  const active = document.querySelector(".tab-btn.active")?.dataset.tab;
+  renderReport(R, { tabsEl: document.getElementById("tabs"), panelsEl: document.getElementById("panels") });
+  // mantém a aba aberta depois de atualizar
+  const btn = active && document.querySelector('.tab-btn[data-tab="' + active + '"]');
+  if (btn && active !== "overview") btn.click();
+  const when = new Date(data.gerado_em).toLocaleString("pt-BR", { timeZone: "America/Recife", dateStyle: "short", timeStyle: "short" });
+  document.getElementById("dataStatusText").textContent = "Dados de " + when + (data.gerado_por ? " (atualizado por " + data.gerado_por + ")" : "") + ".";
+}
+function showError(msg) {
+  document.getElementById("panels").innerHTML = '<p class="loading err">' + msg + '</p>';
+}
 async function loadReport() {
   if (loaded) return;
-  const panelsEl = document.getElementById("panels");
-  const statusEl = document.getElementById("dataStatus");
-  const { data, error } = await supabase.rpc("pricing_relatorio_predios_json");
-  if (error || !data) {
-    panelsEl.innerHTML = '<p class="loading err">Não foi possível carregar os dados agora. Recarregue a página em instantes.</p>';
-    console.error(error);
-    return;
-  }
-  const R = computeReport(data.rows, todayRecife());
-  renderReport(R, { tabsEl: document.getElementById("tabs"), panelsEl });
-  const when = new Date(data.gerado_em).toLocaleString("pt-BR", { timeZone: "America/Recife", dateStyle: "short", timeStyle: "short" });
-  statusEl.textContent = "Dados atualizados em " + when + " (ao vivo da base de reservas).";
+  const { data, error } = await supabase.rpc("pricing_relatorio_predios_get");
+  if (error) { console.error(error); showError("Não foi possível carregar os dados agora. Recarregue a página em instantes."); return; }
   loaded = true;
+  if (!data) return refreshReport();
+  render(data);
 }
+async function refreshReport() {
+  if (refreshing) return;
+  refreshing = true;
+  const b = document.getElementById("btnRefresh");
+  b.disabled = true; b.textContent = "Atualizando…";
+  const { data, error } = await supabase.rpc("pricing_relatorio_predios_refresh");
+  if (error || !data) { console.error(error); alert("Não foi possível atualizar agora. Tente de novo em instantes."); }
+  else render(data);
+  b.disabled = false; b.textContent = "Atualizar dados";
+  refreshing = false;
+}
+document.getElementById("btnRefresh").addEventListener("click", refreshReport);
 
 function showGate(message) {
   app.style.display = "none";
