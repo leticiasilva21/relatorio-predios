@@ -123,7 +123,7 @@ td.prov{color:var(--orange-ink);font-style:italic;}
   <div class="wrap">
     <h1>Relatório Mensal por Prédio — Carpediem</h1>
     <p class="subtitle">Ocupação, ticket médio por noite e receita média do prédio (por unidade ativa), comparando o ano anterior x o ano atual. Dados de reservas confirmadas (status "Reserva", exclui reservas do proprietário).
-    Só entram na conta de ocupação/receita as unidades com pelo menos uma reserva em até 3 meses antes ou depois do mês analisado — unidades sem reserva nesse intervalo (calendário fechado por fim de contrato, por exemplo) saem do cálculo naquele mês.
+    Só entram na conta de ocupação/receita as unidades com pelo menos uma reserva em até 3 meses antes ou depois do mês analisado — unidades sem reserva nesse intervalo (calendário fechado por fim de contrato, por exemplo) saem do cálculo naquele mês. Unidades com contrato encerrado (data de fim do contrato com o proprietário cadastrada na Stays) também saem a partir do dia seguinte ao fim — no mês do término contam só os dias de contrato.
     Reservas gravadas no ID do "mestre" de uma categoria (nome contendo "Margem de Manobra", não-clone) foram reatribuídas ao prédio dos anúncios-irmãos reais daquele grupo — a estadia é real, só a sincronização da Stays grava no mestre em vez do anúncio físico específico. Já os "Margem de Manobra" que são clone (cópia de slot vago dentro da categoria) continuam fora do cálculo. Os números vêm do último snapshot da base Supabase — clique em "Atualizar dados" para recalcular com as reservas de agora.</p>
     <p class="status" id="dataStatus"><span id="dataStatusText"></span> <button id="btnRefresh" class="refresh-btn" type="button">Atualizar dados</button></p>
     <div class="tabs" id="tabs"></div>
@@ -180,7 +180,7 @@ document.addEventListener("click", function(e){
 </script>
 <script type="module">
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeReport, renderReport, todayRecife } from "./report.js?v=2";
+import { computeReport, renderReport, todayRecife } from "./report.js?v=4";
 
 const SUPABASE_URL = "https://ucavfotyciwnqwurzjny.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjYXZmb3R5Y2l3bnF3dXJ6am55Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc5NzUzNjYsImV4cCI6MjA3MzU1MTM2Nn0.nE_W8wZZvJfzlvhP83ge1J0ooS3EcFVSlQYK28eTGU0";
@@ -211,7 +211,7 @@ function showApp(email) {
 let loaded = false;
 let refreshing = false;
 function render(data) {
-  const R = computeReport(data.rows, todayRecife());
+  const R = computeReport(data.rows, todayRecife(), data.fim_contrato || {});
   const active = document.querySelector(".tab-btn.active")?.dataset.tab;
   renderReport(R, { tabsEl: document.getElementById("tabs"), panelsEl: document.getElementById("panels") });
   // mantém a aba aberta depois de atualizar

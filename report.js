@@ -4,7 +4,9 @@
 //  - reservas status "Reserva", sem reserva do proprietário, agrupadas por mês de check-in;
 //  - unidade ativa num mês = teve reserva em até 3 meses antes/depois; para meses futuros também conta
 //    quem teve reserva nos últimos 3 meses até hoje (reserva futura ainda pode não ter sido feita);
-//  - "Margem de Manobra" não-clone tem a receita reatribuída ao prédio do grupo, mas não conta como unidade.
+//  - "Margem de Manobra" não-clone tem a receita reatribuída ao prédio do grupo, mas não conta como unidade;
+//  - unidade com contrato encerrado (owner-contract da Stays, duration.to) sai da conta a partir do dia
+//    seguinte ao fim: no mês do término conta só os dias até o fim; nos meses seguintes não conta.
 
 export const MESES_PT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const ACTIVITY_WINDOW = 3;
@@ -19,7 +21,7 @@ export function todayRecife(now = new Date()) {
 }
 
 // rows: [empreendimento, unit_key, margem_only, ano, mes, reservas, noites, faturamento]
-export function computeReport(rows, today) {
+export function computeReport(rows, today, fimContrato = {}) {
   const Y2 = today.ano, Y1 = today.ano - 1;
   const TODAY_IDX = mi(today.ano, today.mes);
   const REPORT_MONTHS = [];
@@ -48,10 +50,36 @@ export function computeReport(rows, today) {
 
   const buildings = [...unitActivity.keys()].sort();
 
+  // Fim de contrato só vale se a unidade parou de receber check-ins depois dele. Há contratos
+  // renovados sem atualizar a data na Stays (ex.: unidades vendendo em 2027 com fim em 2025) —
+  // nesses casos a data é ignorada e vale só a regra de atividade (±3 meses).
+  const fimEfetivo = {};
+  for (const units of unitActivity.values()) {
+    for (const [u, months] of units) {
+      const fim = fimContrato[u];
+      if (!fim) continue;
+      const [fy, fm] = fim.split("-").map(Number);
+      if (Math.max(...months) <= mi(fy, fm)) fimEfetivo[u] = fim;
+    }
+  }
+
+  // dias do mês em que a unidade estava sob contrato (0 = contrato já tinha acabado)
+  function contractDays(u, ano, mes) {
+    const fim = fimEfetivo[u];
+    const dias = daysIn(ano, mes);
+    if (!fim) return dias;
+    const [fy, fm, fd] = fim.split("-").map(Number);
+    const fIdx = mi(fy, fm), t = mi(ano, mes);
+    if (fIdx > t) return dias;
+    if (fIdx < t) return 0;
+    return fd;
+  }
+
   function activeUnits(b, ano, mes) {
     const target = mi(ano, mes);
     const out = new Set();
     for (const [u, months] of unitActivity.get(b)) {
+      if (!contractDays(u, ano, mes)) continue;
       let ok = false;
       for (const t of months) {
         if (Math.abs(t - target) <= ACTIVITY_WINDOW) { ok = true; break; }
@@ -72,10 +100,13 @@ export function computeReport(rows, today) {
       const s = activeUnits(b, ano, mes);
       activeSets[b][k] = s;
       const m = exact.get(b).get(k) || { reservas: 0, noites: 0, faturamento: 0 };
-      const qtd = s.size, dias = daysIn(ano, mes);
+      const qtd = s.size;
+      let avail = 0;
+      for (const u of s) avail += contractDays(u, ano, mes);
       byBuilding[b][k] = {
         reservas: m.reservas, noites: m.noites, faturamento: m.faturamento,
-        occ: qtd ? m.noites / (qtd * dias) * 100 : 0,
+        avail,
+        occ: avail ? m.noites / avail * 100 : 0,
         adr: m.noites ? m.faturamento / m.noites : 0,
         revcat: qtd ? m.faturamento / qtd : 0,
         alos: m.reservas ? m.noites / m.reservas : 0,
@@ -101,7 +132,7 @@ export function computeReport(rows, today) {
     for (const m of ytdMonths) {
       const d = byBuilding[b][ano + "-" + m];
       noites += d.noites; faturamento += d.faturamento; reservas += d.reservas;
-      avail += d.qtd_unidades * daysIn(ano, m);
+      avail += d.avail;
       for (const u of activeSets[b][ano + "-" + m]) union.add(u);
     }
     return {
@@ -115,7 +146,7 @@ export function computeReport(rows, today) {
   const overview = {};
   for (const b of buildings) overview[b] = { y1: consolidate(b, Y1), y2: consolidate(b, Y2) };
 
-  return { Y1, Y2, today, buildings, byBuilding, unitsYear, overview, ytdMonths };
+  return { Y1, Y2, today, buildings, byBuilding, unitsYear, overview, ytdMonths, fimEfetivo };
 }
 
 // ---------- formatação ----------
@@ -268,8 +299,8 @@ export function renderReport(R, { tabsEl, panelsEl }) {
   const panels = [`
 <section class="panel active" id="panel-overview">
   <p class="note">Consolidado <strong>${per}</strong> — só meses fechados, mesmo recorte nos dois anos, pra comparar de forma justa (o mês em curso ainda está vendendo). Clique no nome do prédio para abrir o detalhe mensal com gráficos.
-  "Unidades ativas" conta as que tiveram reserva em algum mês de ${per} daquele ano com no máximo ${ACTIVITY_WINDOW} meses de intervalo — unidades com calendário fechado
-  por fim de contrato saem da conta de ocupação e receita. Ocupação e ticket médio são a soma do período (não a média simples dos meses).</p>
+  "Unidades ativas" conta as que tiveram reserva em algum mês de ${per} daquele ano com no máximo ${ACTIVITY_WINDOW} meses de intervalo e estavam com contrato vigente
+  (data de fim do contrato com o proprietário na Stays) — unidades com contrato encerrado saem da conta de ocupação e receita a partir do fim do contrato. Ocupação e ticket médio são a soma do período (não a média simples dos meses).</p>
   <div class="table-wrap">
   <table class="overview-table">
     <thead>

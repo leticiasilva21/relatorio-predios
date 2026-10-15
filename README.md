@@ -8,3 +8,5 @@ Relatório de ocupação, ticket médio por noite e receita média por prédio, 
 - Mapeamento nome do anúncio → prédio fica no SQL da RPC (`CASE ... ILIKE`). Prédio novo = adicionar uma linha lá.
 - Publicado via GitHub Pages: https://leticiasilva21.github.io/relatorio-predios/
 - Pensado para ser embutido via `<iframe>` no Jestor.
+
+- Fim de contrato: `public.pricing_listing_contracts` espelha `GET /settings/listing/{id}/owner-contract` da Stays (`duration.to`), sincronizado pela edge function `pricing-sync-owner-contracts` (pg_cron 05:30 e 17:30). A unidade sai da conta a partir do fim do contrato, mas só se parou de ter check-ins depois dele (há contratos renovados sem atualizar a data na Stays).
